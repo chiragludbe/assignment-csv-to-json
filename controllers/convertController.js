@@ -1,5 +1,6 @@
-const connection = require("../db-connector");
+const dbConnector = require("../db-connector");
 let totalRecord = 0;
+let batchNumber = -1;
 const ageGroupCount = {
   "<20": 0,
   "20-40": 0,
@@ -21,8 +22,10 @@ async function parseLargeCsv(csvData) {
     );
   }
 
-  const result = new Array(lines.length - 1);
+  const batchSize = process.env.BATCH_SIZE;
+  const result = [];
 
+  dbConnection = await dbConnector.createConnection();
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
@@ -45,22 +48,21 @@ async function parseLargeCsv(csvData) {
       }
     });
 
-    result[i - 1] = obj;
+    result.push(obj);
+
+    if (result.length >= batchSize) {
+      batchNumber++;
+      await processAndUploadResult(result);
+      result.length = 0;
+    }
   }
 
-  await processAndUploadResult(result);
-}
-
-function classifyAgeGroup(age) {
-  if (age < 20) {
-    ageGroupCount["<20"]++;
-  } else if (age < 40) {
-    ageGroupCount["20-40"]++;
-  } else if (age < 60) {
-    ageGroupCount["40-60"]++;
-  } else {
-    ageGroupCount[">60"]++;
+  if (result.length > 0) {
+    batchNumber++;
+    await processAndUploadResult(result);
   }
+  dbConnector.releaseConnection();
+  printDistributionStats();
 }
 
 async function processAndUploadResult(resultData) {
@@ -82,17 +84,21 @@ async function processAndUploadResult(resultData) {
     }
 
     try {
-      await connection.query(
+      await dbConnection.query(
         `INSERT INTO users (name, age, address, additional_info) VALUES ($1, $2, $3, $4)`,
         [tuple[0], tuple[2], tuple[1], data]
       );
-      totalRecord++;
-      classifyAgeGroup(tuple[2]);
     } catch (error) {
       throw new Error("Error inserting data into PostgreSQL:", error);
     }
+    totalRecord++;
+    segregateAgeGroup(tuple[2]);
   }
 
+  console.log('successfully processed batch #' + batchNumber);
+}
+
+function printDistributionStats () {
   const printData = [
     {
       "Age-Group": "<20",
@@ -113,6 +119,18 @@ async function processAndUploadResult(resultData) {
   ];
 
   console.table(printData);
+}
+
+function segregateAgeGroup(age) {
+  if (age < 20) {
+    ageGroupCount["<20"]++;
+  } else if (age < 40) {
+    ageGroupCount["20-40"]++;
+  } else if (age < 60) {
+    ageGroupCount["40-60"]++;
+  } else {
+    ageGroupCount[">60"]++;
+  }
 }
 
 function getPercentageDistribution(count) {
