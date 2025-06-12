@@ -10,8 +10,9 @@ const connection = new Pool({
 });
 
 // Test the database connection
-connection.connect()
-    .then(() => console.log('Connected to PostgreSQL'))
-    .catch((err) => console.error('Error connecting to PostgreSQL:', err));
+connection
+  .connect()
+  .then(() => console.log("Connected to PostgreSQL"))
+  .catch((err) => console.error("Error connecting to PostgreSQL:", err));
     
 module.exports = connection;
